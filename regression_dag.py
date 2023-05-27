@@ -1,6 +1,6 @@
 """
         README
-This is Apache Airflow DAG which implements basic Machine learning infrastructure.
+This is DAG which implements basic Machine learning infrastructure.
 Pipeline is pretty simple:
 1. Check that web resourse is available
 2. Download dataset from web resource
