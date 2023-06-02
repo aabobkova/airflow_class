@@ -5,7 +5,6 @@ from airflow.operators.python_operator import PythonOperator
 from airflow.operators.python_operator import BranchPythonOperator
 from airflow.operators.email_operator import EmailOperator
 from airflow.operators.bash_operator import BashOperator
-import airflow.hooks.S3_hook
 from datetime import datetime, timedelta
 import logging
 import requests
@@ -21,14 +20,13 @@ class ExtendedPythonOperator(PythonOperator):
     template_fields = ('templates_dict', 'op_kwargs')
 
 
-def remove_file(file_name, local_path):
+def remove_file(file_name):
     '''
     Removes a local file.
     '''
-    file_path = os.path.join(local_path, file_name)
-    if os.path.isfile(file_path):
-        os.remove(file_path)
-        logging.info('removed {}'.format(file_path))
+    if os.path.isfile(file_name):
+        os.remove(file_name)
+        logging.info('removed {}'.format(file_name))
 
 
 def weekday_branch():
@@ -36,7 +34,7 @@ def weekday_branch():
     Returns task_id based on day of week.
     '''
     if datetime.today().weekday() in range(0, 5):
-        return 'ping_rbc'
+        return 'check_conn'
     else:
         return 'end'
 
@@ -53,7 +51,7 @@ def parse_web(**kwargs):
     hrefs = tree.xpath(xpath + "/a")
     div_text = [elem.text_content() for elem in elems]
     href_text = [elem.attrib['href'] for elem in hrefs]
-    with open('tmpnews.txt', "w+", encoding="utf-8") as file:
+    with open(kwargs['file_name'], "w+", encoding="utf-8") as file:
         for elem, href in zip(div_text, href_text):
             replaced = re.sub("//s+", "", elem)
             print(replaced)
@@ -61,23 +59,18 @@ def parse_web(**kwargs):
             file.write('\n')
 
 
-def load_content(file_name, local_path):
+def load_content(file_name):
     '''
     Reads a local file to string.
     '''
     print('DEBUG: loading content')
-    strCont = ""
-    with open('tmpnews.txt', "w+", encoding="utf-8") as file:
+    str_cnt = ""
+    with open(file_name, "w+", encoding="utf-8") as file:
         for line in file:
             print(line)
-            strCnt = strCnt + line
-    return strCont
+            str_cnt += line
+    return str_cnt
 
-
-date = '{{ ds_nodash }}'
-file_name = 'tmpnews.txt'
-cwd = os.getcwd()
-local_downloads = os.path.join(cwd, 'downloads')
 
 default_args = {
     'owner': 'whysobluebunny',
@@ -96,9 +89,9 @@ start = DummyOperator(
     task_id='start',
     dag=dag)
 
-ping_rbc = BashOperator(
-    task_id='ping_rbc',
-    bash_command='ls',
+check_conn = BashOperator(
+    task_id='check_conn',
+    bash_command='nc -vz rbc.ru 443',
     dag=dag
 )
 
@@ -111,8 +104,7 @@ parse_web = PythonOperator(
     task_id='parse_web',
     python_callable=parse_web,
     op_kwargs={'url': 'https://www.rbc.ru/',
-               'file_name': file_name,
-               'local_path': local_downloads},
+               'file_name': 'tmpnews.txt'},
     dag=dag
 )
 
@@ -129,8 +121,7 @@ send_email = EmailOperator(
 
 remove_file = ExtendedPythonOperator(
     python_callable=remove_file,
-    op_kwargs={'file_name': file_name,
-               'local_path': local_downloads},
+    op_kwargs={'file_name': 'tmpnews.txt'},
     task_id='remove_file',
     dag=dag)
 
@@ -139,8 +130,8 @@ end = DummyOperator(
     dag=dag)
 
 start >> weekday_branch
-weekday_branch >> ping_rbc
-ping_rbc >> parse_web
+weekday_branch >> check_conn
+check_conn >> parse_web
 parse_web >> send_email
 send_email >> remove_file
 remove_file >> end
