@@ -5,6 +5,8 @@ from airflow.operators.python_operator import PythonOperator
 from airflow.operators.python_operator import BranchPythonOperator
 from airflow.operators.email_operator import EmailOperator
 from airflow.operators.bash_operator import BashOperator
+from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime, timedelta
 import logging
 import requests
@@ -51,12 +53,26 @@ def parse_web(**kwargs):
     hrefs = tree.xpath(xpath + "/a")
     div_text = [elem.text_content() for elem in elems]
     href_text = [elem.attrib['href'] for elem in hrefs]
+    news_str = ""
     with open(kwargs['file_name'], "w+", encoding="utf-8") as file:
         for elem, href in zip(div_text, href_text):
             replaced = re.sub("//s+", "", elem)
             print(replaced)
-            file.write("{replaced} link: {link}".format(replaced=replaced, link=href))
-            file.write('\n')
+            news_str += "{replaced} link: {link}\n".format(replaced=replaced, link=href)
+        file.write(news_str)
+    write_db(news_str)
+
+
+def write_db(data):
+    postgres_hook = PostgresHook(postgres_conn_id='postgres_conn')
+    conn = postgres_hook.get_conn()
+    cursor = conn.cursor()
+    cursor.execute("insert into news(dt, content) values (%s, %s)",
+                   (datetime.today().strftime('%Y-%m-%d'),
+                    data))
+    conn.commit()
+    cursor.close()
+    conn.close()
 
 
 def load_content(file_name):
@@ -75,7 +91,7 @@ def load_content(file_name):
 default_args = {
     'owner': 'whysobluebunny',
     'start_date': datetime(2023, 6, 1),
-    'end_date': datetime(2023, 6, 3),
+    'end_date': datetime(2023, 6, 10),
     'retries': 1,
     'email': ['wsb.bart@gmail.com'],
     'retries_delay': timedelta(seconds=30)
@@ -129,9 +145,22 @@ end = DummyOperator(
     task_id='end',
     dag=dag)
 
+create_table = PostgresOperator(
+    task_id='create_table',
+    postgres_conn_id='postgres_conn',
+    sql="""
+        create table if not exists news(
+            dt date,
+            content text
+        )
+        """,
+    dag=dag
+)
+
 start >> weekday_branch
 weekday_branch >> check_conn
-check_conn >> parse_web
+check_conn >> create_table
+create_table >> parse_web
 parse_web >> send_email
 send_email >> remove_file
 remove_file >> end
