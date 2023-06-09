@@ -36,25 +36,10 @@ python_task = PythonOperator(
     dag=dag,
 )
 
-email_task = EmailOperator(
-    task_id='email_task',
-    to='alanbishaev@gmail.com',
-    subject='Airflow DAG Execution',
-    html_content='DAG execution completed successfully!',
-    dag=dag,
-)
-
 
 def send_bot():
     bot = telebot.TeleBot('6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs')
-
-    @bot.message_handler(commands=['start'])
-    def start(message):
-        bot.reply_to(message, 'CSV was created successful')
-        chat_id = message.chat.id
-        bot.send_message(chat_id, 'CSV was sorted and copied successful')
-
-    bot.polling()
+    bot.send_message(chat_id=957743253, text='CSV was created successful')
 
 
 telegram_task = PythonOperator(
