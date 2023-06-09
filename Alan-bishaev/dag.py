@@ -1,49 +1,65 @@
+import pandas as pd
 from airflow import DAG
-from airflow.operators.bash_operator import BashOperator
-from airflow.operators.email_operator import EmailOperator
-from airflow.operators.python_operator import PythonOperator
+from airflow.operators.bash import BashOperator
+from airflow.operators.python import PythonOperator
+from airflow.operators.email import EmailOperator
 from datetime import datetime, timedelta
+import telebot
 
-default_args ={
-    "owner":"Alan",
+default_args = {
+    'owner': 'Alan',
     'start_date': datetime(2023, 6, 1),
-    'email': 'alan_bishaev@gmail.com',
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5)
+    'retry_delay': timedelta(seconds=30),
 }
 
-dag = DAG('kaggle_table_dag', default_args=default_args, schedule_interval='* /1 * * * *')
-
-def download_table_func():
-    bash_command = 'curl -o "res.csv" "https://docs.google.com/spreadsheets/d/15nMcN0YCBDNx5S5FBvPd1RgAG1FRNe_f10dMXMCEayc/edit?usp=sharing"'
-
-download_table = BashOperator(
-    task_id='download_table',
-    bash_command=download_table_func,
-    dag=dag
+dag = DAG(
+    'my_dag', default_args=default_args, schedule_interval=timedelta(days=1)
 )
 
-def process_table_func():
-    table_path = "res.csv"
-    with open(table_path, 'r') as file:
-        data = file.read()
-    return data
-
-process_table = PythonOperator(
-    task_id='process_table',
-    python_callable=process_table_func,
-    dag=dag
+bash_task = BashOperator(
+    task_id='bash_task',
+    bash_command='echo "Hello Airflow!"',
+    dag=dag,
 )
 
-send_email = EmailOperator(
-    task_id='send_email',
+
+def process_csv(**kwargs):
+    df = pd.read_csv("~/Desktop/atp_tennis.csv")
+    df = df.drop_duplicates()
+    sorted_df = df.sort_values(by=df.columns[0])
+    sorted_df.to_csv("~/Desktop/result.csv", index=False)
+
+
+python_task = PythonOperator(
+    task_id='python_task',
+    python_callable=process_csv,
+    dag=dag,
+)
+
+email_task = EmailOperator(
+    task_id='email_task',
     to='alanbishaev@gmail.com',
-    subject='Table Processing Results',
-    html_content='Attached is the processed table',
-    files=['output_processed_table.csv'],
-    dag=dag
+    subject='Airflow DAG Execution',
+    html_content='DAG execution completed successfully!',
+    dag=dag,
 )
 
-download_table >> process_table >> send_email
+def send_bot():
+    bot = telebot.TeleBot('6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs')
+    @bot.message_handler(commands=['start'])
+    def start(message):
+        bot.reply_to(message, 'CSV was created successful')
+        chat_id = message.chat.id
+        bot.send_message(chat_id, 'CSV was sorted and copied successful')
+
+    bot.polling()
+
+
+telegram_task=PythonOperator(
+    task_id='telegram_task',
+    python_callable=send_bot,
+    dag=dag,
+)
+
+
+bash_task>>python_task>>telegram_task
