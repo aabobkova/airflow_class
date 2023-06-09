@@ -44,8 +44,10 @@ email_task = EmailOperator(
     dag=dag,
 )
 
+
 def send_bot():
     bot = telebot.TeleBot('6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs')
+
     @bot.message_handler(commands=['start'])
     def start(message):
         bot.reply_to(message, 'CSV was created successful')
@@ -55,11 +57,10 @@ def send_bot():
     bot.polling()
 
 
-telegram_task=PythonOperator(
+telegram_task = PythonOperator(
     task_id='telegram_task',
     python_callable=send_bot,
     dag=dag,
 )
 
-
-bash_task>>python_task>>telegram_task
+bash_task >> python_task >> telegram_task
