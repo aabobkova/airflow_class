@@ -5,9 +5,9 @@ Pipeline is pretty simple:
 1. Check that web resourse is available
 2. Download dataset from web resource
 3. Preprocess dataset and save it
-4. Train model on preprocessed dataset and save trained model
-5. Deserialize model and evaluate it on a full dataset using MAE metrics
-6. Save metrics to postgres database
+4. Whait for data to de saved.
+5. Whait for parameters to be set.
+6. Train blob of models and save to db their results
 7. Report success result to email
 
 It's obvious that this flow is far from production but
@@ -23,6 +23,7 @@ but it will delay debug and development of a flow.
 """
 from airflow import DAG
 from airflow.sensors.bash import BashSensor
+from airflow.sensors.filesystem import FileSensor
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.hooks.postgres_hook import PostgresHook
@@ -50,7 +51,7 @@ fi
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
-    'start_date': datetime(2023, 5, 27),
+    'start_date': datetime(2023, 6, 9),
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 2,
@@ -94,58 +95,18 @@ def preprocess_data(**kwargs):
         '/Users/lohmat/Desktop/hseDistributed/temp/result_preprocessed.csv', index=False)
 
 
-def train_model(**kwargs):
-    # Load preprocessed dataset
-    df = pd.read_csv(
-        '/Users/lohmat/Desktop/hseDistributed/temp/result_preprocessed.csv')
-
-    train_labels = df['quality']
-    train_data = df.loc[:, df.columns != 'quality']
-
-    X_train, _, y_train, _ = train_test_split(
-        train_data, train_labels, test_size=0.2, random_state=1)
-
-    clf = MLPRegressor(alpha=1e-5, random_state=1)
-
-    # Train model
-    clf = clf.fit(X_train, y_train)
-
-    # Save trained model
-    pickle.dump(
-        clf, open('/Users/lohmat/Desktop/hseDistributed/temp/model.pickle', "wb"))
-
-
 t3 = PythonOperator(
     task_id='preprocess_data',
     python_callable=preprocess_data,
     dag=dag,
 )
 
-t4 = PythonOperator(
-    task_id='train_model',
-    python_callable=train_model,
-    dag=dag,
-)
+t4 = FileSensor(task_id='data_sensor', filepath='/Users/lohmat/Desktop/hseDistributed/temp/result_preprocessed.csv', dag=dag)
+t5 = FileSensor(task_id='params_sensor',
+    filepath='/Users/lohmat/Desktop/hseDistributed/temp/params.txt',dag=dag)
 
 
-def save_to_db(**kwargs):
-    # Load the preprocessed data
-    df = pd.read_csv(
-        '/Users/lohmat/Desktop/hseDistributed/temp/result_preprocessed.csv')
-
-    # Test model on it
-    model = pickle.load(
-        open('/Users/lohmat/Desktop/hseDistributed/temp/model.pickle', 'rb'))
-
-    train_labels = df['quality']
-    train_data = df.loc[:, df.columns != 'quality']
-
-    _, X_test, _, y_test = train_test_split(
-        train_data, train_labels, test_size=0.2, random_state=1)
-
-    # Count metrics
-    data_to_save = mean_absolute_error(y_test, model.predict(X_test))
-
+def train_blob(**kwargs):
     # Establish a connection to the database
     hook = PostgresHook(postgres_conn_id='my_postgres_connection')
 
@@ -161,22 +122,50 @@ def save_to_db(**kwargs):
         """
     )
 
-    # Insert data
-    hook.run(
-        'insert into model_results (id, mae_result, stamp) values (%(id)s, %(mae_result)s, %(stamp)s)',
-        parameters={'id': str(uuid.uuid4()), 'mae_result': data_to_save,
-                    'stamp': datetime.now().isoformat()},
-    )
+    # Load preprocessed dataset
+    df = pd.read_csv(
+        '/Users/lohmat/Desktop/hseDistributed/temp/result_preprocessed.csv')
+
+    train_labels = df['quality']
+    train_data = df.loc[:, df.columns != 'quality']
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        train_data, train_labels, test_size=0.2, random_state=1)
+
+    with open('/Users/lohmat/Desktop/hseDistributed/temp/params.txt') as f:
+        count = 0
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            args = line.split(';')
+
+            clf = MLPRegressor(hidden_layer_sizes=int(args[0]), alpha=float(
+                args[1]), activation=args[2].strip(), solver=args[3].strip(), random_state=1)
+
+            # Train model
+            clf = clf.fit(X_train, y_train)
+
+            mae = mean_absolute_error(y_test, clf.predict(X_test))
+
+            # Insert data
+            hook.run(
+                'insert into model_results (id, mae_result, stamp) values (%(id)s, %(mae_result)s, %(stamp)s)',
+                parameters={'id': str(count), 'mae_result': mae,
+                            'stamp': datetime.now().isoformat()},
+            )
+            count += 1
 
 
-t5 = PythonOperator(
-    task_id='save_model_to_db',
-    python_callable=save_to_db,
+t6 = PythonOperator(
+    task_id='train_blob',
+    python_callable=train_blob,
     dag=dag,
 )
 
+
 # Send an email upon successful completion
-t6 = EmailOperator(
+t7 = EmailOperator(
     task_id='send_email_report',
     to='lokhmatikov.htc@gmail.com',
     subject='Airflow Alert',
@@ -188,4 +177,4 @@ t6 = EmailOperator(
     trigger_rule='all_success',
 )
 
-t1 >> t2 >> t3 >> t4 >> t5 >> t6
+t1 >> t2 >> t3 >> t4 >> t5 >> t6 >> t7
