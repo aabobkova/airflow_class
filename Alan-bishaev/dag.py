@@ -2,9 +2,10 @@ import pandas as pd
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
-from airflow.operators.email import EmailOperator
+from airflow.providers.http.operators.http import SimpleHttpOperator
 from datetime import datetime, timedelta
 import telebot
+import json
 
 default_args = {
     'owner': 'Alan',
@@ -42,10 +43,20 @@ def send_bot():
     bot.send_message(chat_id=957743253, text='CSV was created successful')
 
 
-telegram_task = PythonOperator(
-    task_id='telegram_task',
-    python_callable=send_bot,
-    dag=dag,
+telegram_task = SimpleHttpOperator(
+        task_id="telegram_task",
+        endpoint="/bot6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs/sendMessage",
+        http_conn_id="telegram_conn_id",
+        method="POST",
+        data=json.dumps(
+            {
+                "text": "Connection is successful!",
+                "chat_id": "957743253",
+            }
+        ),
+        headers={"Content-Type": "application/json"},
+        response_check=lambda response: response.json()["ok"] == True,
+        dag=dag,
 )
 
 bash_task >> python_task >> telegram_task
