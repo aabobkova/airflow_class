@@ -42,20 +42,22 @@ def send_bot():
     bot = telebot.TeleBot('6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs')
     bot.send_message(chat_id=957743253, text='CSV was created successful')
 
+def data():
+    data = json.dumps(
+        {
+            "text": "Connection is successful!",
+            "chat_id": "957743253",
+        }
+    return data
+
 
 telegram_task = SimpleHttpOperator(
         task_id="telegram_task",
-        endpoint="/bot6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs/sendMessage",
         http_conn_id="telegram_conn_id",
         method="POST",
-        data=json.dumps(
-            {
-                "text": "Connection is successful!",
-                "chat_id": "957743253",
-            }
-        ),
-        headers={"Content-Type": "application/json"},
+        data=data,
         response_check=lambda response: response.json()["ok"] == True,
+        endpoint="/bot6171117824:AAGoy-sVv2V12wlJ-IorupxqUGMGei4xAJs/sendMessage",
         dag=dag,
 )
 
